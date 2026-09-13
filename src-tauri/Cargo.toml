@@ -6,9 +6,6 @@ rust-version = "1.96"
 publish = false
 description = "A native window for a hosted Nexus instance"
 
-# Own workspace: the desktop shell needs a GUI toolchain the platform workspace
-# must never require, so it is built and released on its own.
-[workspace]
 
 [lib]
 name = "nexus_desktop_lib"
@@ -58,8 +55,3 @@ url = "2"
 default = ["native-tls"]
 native-tls = ["reqwest/native-tls", "tauri-plugin-updater/native-tls"]
 rustls-tls = ["reqwest/rustls", "tauri-plugin-updater/rustls-tls"]
-
-[profile.release]
-codegen-units = 1
-lto = true
-strip = true

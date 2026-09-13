@@ -88,4 +88,4 @@ edit("src-tauri/Cargo.toml", (source) => {
     .join("\n");
 });
 
-console.log("Next: commit, then tag desktop-vX.Y.Z with a message, then push the tag.");
+console.log("Next: commit, then tag vX.Y.Z with a message, then push the tag.");

@@ -1,5 +1,5 @@
 {
-  "name": "@nexus/desktop",
+  "name": "nexus-client",
   "private": true,
   "version": "0.1.5",
   "scripts": {
@@ -10,5 +10,6 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.11.4"
-  }
+  },
+  "description": "The native client for your own Nexus instance"
 }
