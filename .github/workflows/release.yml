@@ -1,0 +1,311 @@
+# Nexus Client: checks on every push and pull request, installers on a `v*` tag.
+#
+# One owner-side setting makes releases self-updating. It is one-time, and the
+# README ("For the maintainer") carries the exact steps: the update signing key.
+# `npx @tauri-apps/cli signer generate` produces a private key and a public key.
+# The private key goes in the repository secret TAURI_SIGNING_PRIVATE_KEY (with
+# its passphrase in TAURI_SIGNING_PRIVATE_KEY_PASSWORD) and signs every release
+# artifact; the public key goes in the repository variable
+# NEXUS_DESKTOP_UPDATER_PUBKEY and is compiled into the client, which verifies
+# every download against it. Until the secret exists the job still builds
+# installers, it just does not publish an update manifest, and clients built
+# without the variable say "Updates unavailable in this build" instead of
+# checking.
+#
+# Everything here runs on GitHub-hosted runners; a public repository gets them
+# for free.
+
+name: release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version for the release name (the build reads the real version from tauri.conf.json)"
+        required: false
+        type: string
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+jobs:
+  check:
+    name: check
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref_type == 'branch')
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: clippy, rustfmt
+
+      # rust-toolchain.toml at the repository root pins the compiler, so the
+      # Windows target has to be added to that toolchain rather than to whatever
+      # "stable" happens to be today.
+      - name: Add the Windows target to the pinned toolchain
+        run: rustup target add x86_64-pc-windows-msvc
+
+      # tauri-build compiles a Windows resource file even for `cargo check`.
+      # Cross-compiling that from Linux needs an LLVM resource compiler; the
+      # runner image ships one, under a version-suffixed name.
+      - name: Locate a resource compiler for the Windows target
+        run: |
+          rc="$(command -v llvm-rc || true)"
+          if [ -z "$rc" ]; then rc="$(ls -1 /usr/lib/llvm-*/bin/llvm-rc 2>/dev/null | sort -V | tail -1 || true)"; fi
+          if [ -z "$rc" ]; then rc="$(ls -1 /usr/bin/llvm-rc-* 2>/dev/null | sort -V | tail -1 || true)"; fi
+          if [ -z "$rc" ]; then echo "no llvm-rc on this runner" >&2; exit 1; fi
+          echo "RC=$rc" >> "$GITHUB_ENV"
+          echo "using $rc"
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: npm ci
+        run: npm ci
+
+      - name: cargo fmt
+        run: cargo fmt --all -- --check
+
+      - name: cargo test (nexus-desktop-core)
+        run: cargo test -p nexus-desktop-core
+
+      # The shell needs a GUI toolchain to build for Linux and a linker to link
+      # for Windows, and this runner has neither. Checking and linting against
+      # x86_64-pc-windows-msvc needs neither: it type-checks every target,
+      # including the test targets, without producing a binary.
+      - name: cargo clippy (windows target)
+        run: cargo clippy -p nexus-desktop --target x86_64-pc-windows-msvc --all-targets -- -D warnings
+
+      - name: cargo check (windows target)
+        run: cargo check -p nexus-desktop --target x86_64-pc-windows-msvc --all-targets
+
+      # Build receipt: a ref any git client can list, so the outcome is visible
+      # from a machine with no GitHub CLI (`git ls-remote origin 'refs/desktop-ci/*'`).
+      - name: Push the build receipt
+        if: always() && github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          receipt="refs/desktop-ci/${{ github.sha }}/${{ github.job }}-ubuntu/${{ job.status }}"
+          git push --force origin "HEAD:${receipt}" && echo "receipt ${receipt}"
+
+  release:
+    name: release (${{ matrix.platform }})
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref_type == 'tag')
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: ""
+            targets: "x86_64-pc-windows-msvc"
+          - platform: macos-latest
+            # One bundle that runs on both Intel and Apple silicon Macs.
+            args: "--target universal-apple-darwin"
+            targets: "aarch64-apple-darwin,x86_64-apple-darwin"
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Tags and their messages, so the release body can come from the tag.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.targets }}
+
+      - name: Add the macOS targets to the pinned toolchain
+        if: matrix.platform == 'macos-latest'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: npm ci
+        run: npm ci
+
+      - name: Read the release notes from the tag
+        id: notes
+        shell: bash
+        run: |
+          body=""
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            body="$(git tag -l --format='%(contents)' "${{ github.ref_name }}")"
+          fi
+          {
+            echo "body<<NEXUS_RELEASE_BODY"
+            echo "$body"
+            echo "NEXUS_RELEASE_BODY"
+          } >> "$GITHUB_OUTPUT"
+
+      # The updater is configured only when the owner's signing key exists: the
+      # base tauri.conf.json carries no updater section (the bundler refuses one
+      # without a public key), so this step writes an overlay with the public
+      # key, the endpoint, and createUpdaterArtifacts, and hands it to the build.
+      # The public key reaches the compiler only through this step's output, so
+      # a build never carries a key without the section the plugin reads its
+      # endpoints from. v0.1.6 did: the unset variable arrived as an empty
+      # string, the plugin was registered, and the shell died on every launch.
+      - name: Prepare the updater config overlay
+        id: updater
+        shell: bash
+        working-directory: src-tauri
+        env:
+          SIGNING_KEY_PRESENT: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+          NEXUS_DESKTOP_UPDATER_PUBKEY: ${{ vars.NEXUS_DESKTOP_UPDATER_PUBKEY }}
+          UPDATE_ENDPOINT: https://github.com/${{ github.repository }}/releases/latest/download/latest.json
+        run: |
+          pubkey="$(printf '%s' "$NEXUS_DESKTOP_UPDATER_PUBKEY" | tr -d '[:space:]')"
+          if [ "$SIGNING_KEY_PRESENT" = "true" ] && [ -n "$pubkey" ]; then
+            printf '%s' "$pubkey" | node -e '
+              const fs = require("fs");
+              const pubkey = fs.readFileSync(0, "utf8").trim();
+              const overlay = { bundle: { createUpdaterArtifacts: true }, plugins: { updater: {
+                pubkey, endpoints: [process.env.UPDATE_ENDPOINT], windows: { installMode: "passive" } } } };
+              fs.writeFileSync("updater.conf.json", JSON.stringify(overlay, null, 2));'
+            {
+              echo "args=--config updater.conf.json"
+              echo "enabled=true"
+              echo "pubkey=$pubkey"
+            } >> "$GITHUB_OUTPUT"
+            echo "updater overlay written for $UPDATE_ENDPOINT"
+          else
+            {
+              echo "args="
+              echo "enabled=false"
+              echo "pubkey="
+            } >> "$GITHUB_OUTPUT"
+            echo "no signing key or public key: building without the updater"
+          fi
+
+      # Build once here with the output captured, and publish that log as a git
+      # ref whatever the outcome, so a failure can be read from any git client.
+      # tauri-action rebuilds from the warm cargo cache afterwards and publishes.
+      - name: Build the bundles (logged)
+        id: build
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          NEXUS_DESKTOP_UPDATER_PUBKEY: ${{ steps.updater.outputs.pubkey }}
+        run: |
+          set -o pipefail
+          npm run build -- ${{ steps.updater.outputs.args }} ${{ matrix.args }} 2>&1 | tee build.log
+
+      - name: Publish the build log as a git ref
+        if: always()
+        shell: bash
+        run: |
+          # The log rides as the MESSAGE of a commit on the current tree, pushed to
+          # refs/desktop-ci/<sha>/logs/<platform>; read it with
+          # `git fetch origin <ref> && git log -1 --format=%B FETCH_HEAD`.
+          if [ ! -f build.log ]; then echo "(no build log: the build step did not start)" > build.log; fi
+          tail -c 180000 build.log > build.tail.log || cp build.log build.tail.log
+          tree="$(git rev-parse HEAD^{tree})"
+          commit="$(git -c user.name=nexus-ci -c user.email=ci@nexus-client.invalid commit-tree "$tree" -F build.tail.log)" || { echo "commit-tree failed"; exit 0; }
+          git push --force origin "$commit:refs/desktop-ci/${{ github.sha }}/logs/${{ matrix.platform }}" || echo "log push failed"
+
+      # The built shell has to come up before it is published: v0.1.6 built
+      # cleanly on both platforms and died during startup on every launch. The
+      # runner has a desktop session and a web view, so this launches the binary
+      # the bundle was made from, gives it twenty seconds, and looks for the log
+      # line the shell writes at the end of its setup. A shell that is showing
+      # its startup-failure dialog stays alive, so the log line is the check,
+      # not the process.
+      - name: Smoke test the built shell (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path target -Recurse -Filter nexus-desktop.exe |
+            Where-Object { $_.FullName -match '\\release\\nexus-desktop\.exe$' } |
+            Select-Object -First 1
+          if (-not $exe) { throw "no release nexus-desktop.exe under target/" }
+          "launching $($exe.FullName)"
+          $p = Start-Process -FilePath $exe.FullName -PassThru
+          Start-Sleep -Seconds 20
+          $logs = Join-Path $env:LOCALAPPDATA 'com.septimas.nexus\logs'
+          foreach ($name in 'nexus-desktop.log', 'crash.log') {
+            $file = Join-Path $logs $name
+            if (Test-Path $file) { "--- $file"; Get-Content $file }
+          }
+          $exited = $p.HasExited
+          if (-not $exited) { Stop-Process -Id $p.Id -Force }
+          if ($exited) { throw "the shell exited during startup with code $($p.ExitCode)" }
+          $log = Join-Path $logs 'nexus-desktop.log'
+          if (-not (Test-Path $log) -or -not (Select-String -Path $log -Pattern 'Nexus Desktop v.* started' -Quiet)) {
+            throw "the shell ran but never logged that it started"
+          }
+          "the shell started and stayed up for 20 s"
+
+      - name: Smoke test the built shell (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          bin="target/universal-apple-darwin/release/nexus-desktop"
+          if [ ! -x "$bin" ]; then
+            bin="$(find target -type f -name nexus-desktop -path '*/release/nexus-desktop' | head -1)"
+          fi
+          if [ -z "$bin" ] || [ ! -x "$bin" ]; then echo "no release nexus-desktop binary under target/"; exit 1; fi
+          echo "launching $bin"
+          "$bin" &
+          pid=$!
+          sleep 20
+          logs="$HOME/Library/Logs/com.septimas.nexus"
+          for name in nexus-desktop.log crash.log; do
+            if [ -f "$logs/$name" ]; then echo "--- $logs/$name"; cat "$logs/$name"; fi
+          done
+          if ! kill -0 "$pid" 2>/dev/null; then
+            code=0; wait "$pid" || code=$?
+            echo "the shell exited during startup with code $code"; exit 1
+          fi
+          kill "$pid" 2>/dev/null || true
+          if ! grep -q 'Nexus Desktop v.* started' "$logs/nexus-desktop.log" 2>/dev/null; then
+            echo "the shell ran but never logged that it started"; exit 1
+          fi
+          echo "the shell started and stayed up for 20 s"
+
+      - uses: tauri-apps/tauri-action@v1.0.0
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          NEXUS_DESKTOP_UPDATER_PUBKEY: ${{ steps.updater.outputs.pubkey }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__
+          releaseName: ${{ inputs.version && format('Nexus Desktop v{0}', inputs.version) || 'Nexus Desktop v__VERSION__' }}
+          releaseBody: ${{ steps.notes.outputs.body }}
+          releaseDraft: false
+          prerelease: false
+          # An unsigned build must not publish an update manifest: a client
+          # would refuse the artifacts anyway, and a manifest pointing at
+          # unverifiable downloads is worse than no manifest.
+          uploadUpdaterJson: ${{ steps.updater.outputs.enabled == 'true' }}
+          updaterJsonPreferNsis: true
+          args: ${{ steps.updater.outputs.args }} ${{ matrix.args }}
+
+      - name: Push the build receipt
+        if: always()
+        shell: bash
+        run: |
+          receipt="refs/desktop-ci/${{ github.sha }}/${{ github.job }}-${{ matrix.platform }}/${{ job.status }}"
+          git push --force origin "HEAD:${receipt}" && echo "receipt ${receipt}"

@@ -1,0 +1,60 @@
+[package]
+name = "nexus-desktop"
+version = "0.1.8"
+edition = "2024"
+rust-version = "1.96"
+publish = false
+description = "A native window for a hosted Nexus instance"
+
+
+[lib]
+name = "nexus_desktop_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "nexus-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = "2.6.3"
+
+[dependencies]
+nexus-desktop-core = { path = "../nexus-desktop-core" }
+log = "0.4"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "system-proxy"] }
+# The message box a startup failure is reported in. Already in the tree through
+# tauri-plugin-dialog, so this adds no crate.
+rfd = { version = "0.16.0", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2.11.5", features = ["tray-icon", "image-png", "image-ico"] }
+tauri-plugin-autostart = "2.5.1"
+tauri-plugin-dialog = "2.7.3"
+tauri-plugin-log = "2.9.1"
+tauri-plugin-opener = "2.5.5"
+tauri-plugin-process = "2.3.1"
+tauri-plugin-single-instance = "2.4.4"
+tauri-plugin-store = "2.4.4"
+tauri-plugin-updater = { version = "2.11.0", default-features = false, features = ["system-proxy", "zip"] }
+tokio = { version = "1", features = ["rt", "sync", "time"] }
+url = "2"
+
+# TLS backend.
+#
+# `native-tls` is SChannel on Windows and Security.framework on macOS: pure Rust
+# bindings to the TLS stack the operating system already has, using the trust
+# store the machine already trusts. It needs no C toolchain, which is what lets
+# `cargo check` and `clippy` run against x86_64-pc-windows-msvc from a Linux
+# runner, so the configuration that is verified is the configuration that ships.
+# It never reaches OpenSSL, because the only bundle targets are Windows and
+# macOS.
+#
+# `rustls-tls` is kept as an escape hatch (a Linux target would make native-tls
+# mean OpenSSL). It is heavier: reqwest brings aws-lc-rs and the updater brings
+# ring, so a rustls build carries two crypto providers and needs cmake, a C
+# compiler, and NASM on Windows. No first-party code differs between the two.
+[features]
+default = ["native-tls"]
+native-tls = ["reqwest/native-tls", "tauri-plugin-updater/native-tls"]
+rustls-tls = ["reqwest/rustls", "tauri-plugin-updater/rustls-tls"]

@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Installing an update</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main>
+      <div class="mark" aria-hidden="true">N</div>
+      <h1 id="title">Installing Nexus Desktop...</h1>
+      <progress id="bar" max="100"></progress>
+      <p id="detail" role="status" aria-live="polite">Downloading.</p>
+      <p id="error" class="error" role="alert" hidden></p>
+      <p class="muted">Nexus Desktop restarts by itself when the update is installed.</p>
+    </main>
+
+    <script type="module" src="updating.js"></script>
+  </body>
+</html>

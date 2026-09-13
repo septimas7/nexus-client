@@ -1,0 +1,15 @@
+{
+  "name": "nexus-client",
+  "private": true,
+  "version": "0.1.8",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "icons": "tauri icon assets/icon.svg"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4"
+  },
+  "description": "The native client for your own Nexus instance"
+}
