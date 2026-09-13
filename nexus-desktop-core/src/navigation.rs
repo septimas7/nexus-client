@@ -3,8 +3,8 @@
 //! FR-002 forbids a route table: the shell keeps no allowlist, denylist, or
 //! page manifest for the instance origin, because that is what makes
 //! reimplementing a portal screen structurally impossible rather than policed.
-//! The whole policy is therefore an origin comparison, and this module is the
-//! only place it is written.
+//! The whole policy is therefore an origin comparison, plus one short list of
+//! sign-in hosts, and this module is the only place it is written.
 
 use url::Url;
 
@@ -19,11 +19,32 @@ pub enum Navigation {
     Block,
 }
 
+/// The hosts the instance's sign-in redirects to (CMP-001 decision G).
+///
+/// Signing in with a provider starts on the instance origin, bounces through
+/// the provider's pages, and returns to the instance's callback. That round
+/// trip has to happen inside the window: sent to the system browser, the
+/// callback would set the session cookie in a browser the shell cannot see,
+/// and the window would stay signed out. These are the hosts the platform's
+/// provider kinds redirect to (Google; Microsoft, work and personal; Apple).
+/// A generic provider on another host is not covered and needs a release
+/// naming it. Only https counts, and only these exact hosts: no subdomains,
+/// so a look-alike such as `accounts.google.com.example.net` stays outside.
+pub const SIGN_IN_HOSTS: &[&str] = &[
+    "accounts.google.com",
+    "login.microsoftonline.com",
+    "login.live.com",
+    "login.microsoft.com",
+    "appleid.apple.com",
+];
+
 /// Decide what to do with a navigation the web view is about to make.
 ///
 /// * anything on the instance origin, at any depth, including the portal's own
 ///   sign-in redirect: [`Navigation::Allow`]
 /// * the shell's own bundled pages: [`Navigation::Allow`]
+/// * the sign-in pages of the supported identity providers, over https:
+///   [`Navigation::Allow`], so a provider sign-in completes in the window
 /// * any other http or https origin: [`Navigation::OpenExternally`], so a link
 ///   out of the portal lands in the browser the person already uses and never
 ///   in a window that holds a session
@@ -36,6 +57,7 @@ pub fn policy(instance_origin: Option<&Url>, requested_url: &Url) -> Navigation 
     match requested_url.scheme() {
         "http" | "https" => match instance_origin {
             Some(origin) if same_origin(origin, requested_url) => Navigation::Allow,
+            _ if is_sign_in_host(requested_url) => Navigation::Allow,
             _ => Navigation::OpenExternally,
         },
         _ => Navigation::Block,
@@ -48,6 +70,15 @@ pub fn same_origin(left: &Url, right: &Url) -> bool {
     left.scheme() == right.scheme()
         && left.host() == right.host()
         && left.port_or_known_default() == right.port_or_known_default()
+}
+
+/// An https address on one of the [`SIGN_IN_HOSTS`], exactly.
+pub fn is_sign_in_host(url: &Url) -> bool {
+    url.scheme() == "https"
+        && url
+            .host_str()
+            .map(str::to_ascii_lowercase)
+            .is_some_and(|host| SIGN_IN_HOSTS.contains(&host.as_str()))
 }
 
 /// The shell's own bundled pages. Tauri serves them over the `tauri:` custom
@@ -147,6 +178,52 @@ mod tests {
             decide(instance, "https://cdn.nexus.tail-net.ts.net/x.js"),
             Navigation::OpenExternally
         );
+    }
+
+    #[test]
+    fn the_sign_in_providers_are_followed_in_the_window() {
+        let instance = "https://nexus.tail-net.ts.net/";
+        for requested in [
+            "https://accounts.google.com/o/oauth2/v2/auth?client_id=x&state=y",
+            "https://accounts.google.com/signin/oauth/consent",
+            "https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize?state=y",
+            "https://login.live.com/oauth20_authorize.srf",
+            "https://appleid.apple.com/auth/authorize?state=y",
+        ] {
+            assert_eq!(
+                decide(instance, requested),
+                Navigation::Allow,
+                "requested: {requested}"
+            );
+        }
+        // Before an instance is bound there is no sign-in to complete, but the
+        // hosts are still safe to show; the answer does not depend on binding.
+        assert_eq!(
+            policy(None, &url("https://accounts.google.com/o/oauth2/v2/auth")),
+            Navigation::Allow
+        );
+    }
+
+    #[test]
+    fn a_look_alike_or_plaintext_sign_in_host_still_goes_outside() {
+        let instance = "https://nexus.tail-net.ts.net/";
+        for requested in [
+            "https://accounts.google.com.example.net/o/oauth2/v2/auth",
+            "https://evil-accounts.google.com/",
+            "https://myaccount.google.com/",
+            "https://www.login.live.com/",
+            "http://accounts.google.com/o/oauth2/v2/auth",
+        ] {
+            assert_eq!(
+                decide(instance, requested),
+                Navigation::OpenExternally,
+                "requested: {requested}"
+            );
+        }
+        assert!(is_sign_in_host(&url("https://ACCOUNTS.GOOGLE.COM/x")));
+        assert!(!is_sign_in_host(&url(
+            "https://accounts.google.com.example.net/"
+        )));
     }
 
     #[test]
