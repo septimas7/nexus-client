@@ -17,8 +17,10 @@ use url::Url;
 
 use crate::{AppState, tray, window};
 
-/// The updater's public key, baked at build time. `None` disables the updater.
-pub const PUBKEY: Option<&str> = option_env!("NEXUS_DESKTOP_UPDATER_PUBKEY");
+/// The updater's public key, baked at build time. `None` disables the updater;
+/// an empty or blank variable counts as `None` (`update::configured_pubkey`).
+pub const PUBKEY: Option<&str> =
+    update::configured_pubkey(option_env!("NEXUS_DESKTOP_UPDATER_PUBKEY"));
 
 /// How often the schedule is consulted. The answer is usually "not yet"; the
 /// short tick exists so a laptop that slept through its six hour mark checks
@@ -31,9 +33,28 @@ const SCHEDULE_TICK: Duration = Duration::from_secs(15 * 60);
 /// (Technical Design, CMP-004 decision C).
 const INSTANCE_MANIFEST_PATH: &str = "desktop/latest.json";
 
-/// Whether this build can update itself.
-pub fn is_enabled() -> bool {
-    PUBKEY.is_some()
+/// Whether the updater plugin can be registered, with the reason when it
+/// cannot.
+///
+/// Two things have to agree: a public key compiled in from the build variable,
+/// and the `plugins.updater` section of the configuration, which the release
+/// workflow writes in the same step that exports the key. The plugin reads its
+/// endpoints from that section and refuses to initialise without it, so a build
+/// with one and not the other is treated as an unsigned build rather than
+/// registered and left to fail during startup, which is how v0.1.6 died.
+pub fn registration(config: &tauri::Config) -> Result<&'static str, &'static str> {
+    let Some(pubkey) = PUBKEY else {
+        return Err("this build carries no updater public key");
+    };
+    if !config.plugins.0.contains_key("updater") {
+        return Err("this build carries an updater public key but no updater configuration");
+    }
+    Ok(pubkey)
+}
+
+/// Whether this running app can update itself.
+pub fn is_enabled<R: Runtime>(app: &AppHandle<R>) -> bool {
+    app.state::<AppState>().updater_enabled
 }
 
 /// What the updating page renders.
@@ -49,8 +70,7 @@ struct Progress {
 /// Start the background schedule: once shortly after launch, then whenever
 /// [`update::schedule`] says a check is due.
 pub fn spawn_schedule<R: Runtime>(app: AppHandle<R>) {
-    if !is_enabled() {
-        log::info!("this build carries no updater public key; update checks are disabled");
+    if !is_enabled(&app) {
         return;
     }
 
@@ -75,7 +95,7 @@ pub fn spawn_schedule<R: Runtime>(app: AppHandle<R>) {
 /// `interactive` is true for the tray's "Check for updates" item, which is the
 /// only case where "you are up to date" is worth a dialog.
 pub async fn check_and_prompt<R: Runtime>(app: AppHandle<R>, interactive: bool) {
-    if !is_enabled() {
+    if !is_enabled(&app) {
         if interactive {
             notify(
                 &app,

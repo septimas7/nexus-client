@@ -162,6 +162,10 @@ jobs:
       # base tauri.conf.json carries no updater section (the bundler refuses one
       # without a public key), so this step writes an overlay with the public
       # key, the endpoint, and createUpdaterArtifacts, and hands it to the build.
+      # The public key reaches the compiler only through this step's output, so
+      # a build never carries a key without the section the plugin reads its
+      # endpoints from. v0.1.6 did: the unset variable arrived as an empty
+      # string, the plugin was registered, and the shell died on every launch.
       - name: Prepare the updater config overlay
         id: updater
         shell: bash
@@ -171,17 +175,26 @@ jobs:
           NEXUS_DESKTOP_UPDATER_PUBKEY: ${{ vars.NEXUS_DESKTOP_UPDATER_PUBKEY }}
           UPDATE_ENDPOINT: https://github.com/${{ github.repository }}/releases/latest/download/latest.json
         run: |
-          if [ "$SIGNING_KEY_PRESENT" = "true" ] && [ -n "$NEXUS_DESKTOP_UPDATER_PUBKEY" ]; then
-            printf '%s' "$NEXUS_DESKTOP_UPDATER_PUBKEY" | node -e '
+          pubkey="$(printf '%s' "$NEXUS_DESKTOP_UPDATER_PUBKEY" | tr -d '[:space:]')"
+          if [ "$SIGNING_KEY_PRESENT" = "true" ] && [ -n "$pubkey" ]; then
+            printf '%s' "$pubkey" | node -e '
               const fs = require("fs");
               const pubkey = fs.readFileSync(0, "utf8").trim();
               const overlay = { bundle: { createUpdaterArtifacts: true }, plugins: { updater: {
                 pubkey, endpoints: [process.env.UPDATE_ENDPOINT], windows: { installMode: "passive" } } } };
               fs.writeFileSync("updater.conf.json", JSON.stringify(overlay, null, 2));'
-            echo "args=--config updater.conf.json" >> "$GITHUB_OUTPUT"
+            {
+              echo "args=--config updater.conf.json"
+              echo "enabled=true"
+              echo "pubkey=$pubkey"
+            } >> "$GITHUB_OUTPUT"
             echo "updater overlay written for $UPDATE_ENDPOINT"
           else
-            echo "args=" >> "$GITHUB_OUTPUT"
+            {
+              echo "args="
+              echo "enabled=false"
+              echo "pubkey="
+            } >> "$GITHUB_OUTPUT"
             echo "no signing key or public key: building without the updater"
           fi
 
@@ -194,7 +207,7 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          NEXUS_DESKTOP_UPDATER_PUBKEY: ${{ vars.NEXUS_DESKTOP_UPDATER_PUBKEY }}
+          NEXUS_DESKTOP_UPDATER_PUBKEY: ${{ steps.updater.outputs.pubkey }}
         run: |
           set -o pipefail
           npm run build -- ${{ steps.updater.outputs.args }} ${{ matrix.args }} 2>&1 | tee build.log
@@ -209,14 +222,73 @@ jobs:
           if [ ! -f build.log ]; then echo "(no build log: the build step did not start)" > build.log; fi
           tail -c 180000 build.log > build.tail.log || cp build.log build.tail.log
           tree="$(git rev-parse HEAD^{tree})"
-          commit="$(git commit-tree "$tree" -F build.tail.log)" || { echo "commit-tree failed"; exit 0; }
+          commit="$(git -c user.name=nexus-ci -c user.email=ci@nexus-client.invalid commit-tree "$tree" -F build.tail.log)" || { echo "commit-tree failed"; exit 0; }
           git push --force origin "$commit:refs/desktop-ci/${{ github.sha }}/logs/${{ matrix.platform }}" || echo "log push failed"
+
+      # The built shell has to come up before it is published: v0.1.6 built
+      # cleanly on both platforms and died during startup on every launch. The
+      # runner has a desktop session and a web view, so this launches the binary
+      # the bundle was made from, gives it twenty seconds, and looks for the log
+      # line the shell writes at the end of its setup. A shell that is showing
+      # its startup-failure dialog stays alive, so the log line is the check,
+      # not the process.
+      - name: Smoke test the built shell (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path target -Recurse -Filter nexus-desktop.exe |
+            Where-Object { $_.FullName -match '\\release\\nexus-desktop\.exe$' } |
+            Select-Object -First 1
+          if (-not $exe) { throw "no release nexus-desktop.exe under target/" }
+          "launching $($exe.FullName)"
+          $p = Start-Process -FilePath $exe.FullName -PassThru
+          Start-Sleep -Seconds 20
+          $logs = Join-Path $env:LOCALAPPDATA 'com.septimas.nexus\logs'
+          foreach ($name in 'nexus-desktop.log', 'crash.log') {
+            $file = Join-Path $logs $name
+            if (Test-Path $file) { "--- $file"; Get-Content $file }
+          }
+          $exited = $p.HasExited
+          if (-not $exited) { Stop-Process -Id $p.Id -Force }
+          if ($exited) { throw "the shell exited during startup with code $($p.ExitCode)" }
+          $log = Join-Path $logs 'nexus-desktop.log'
+          if (-not (Test-Path $log) -or -not (Select-String -Path $log -Pattern 'Nexus Desktop v.* started' -Quiet)) {
+            throw "the shell ran but never logged that it started"
+          }
+          "the shell started and stayed up for 20 s"
+
+      - name: Smoke test the built shell (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          bin="target/universal-apple-darwin/release/nexus-desktop"
+          if [ ! -x "$bin" ]; then
+            bin="$(find target -type f -name nexus-desktop -path '*/release/nexus-desktop' | head -1)"
+          fi
+          if [ -z "$bin" ] || [ ! -x "$bin" ]; then echo "no release nexus-desktop binary under target/"; exit 1; fi
+          echo "launching $bin"
+          "$bin" &
+          pid=$!
+          sleep 20
+          logs="$HOME/Library/Logs/com.septimas.nexus"
+          for name in nexus-desktop.log crash.log; do
+            if [ -f "$logs/$name" ]; then echo "--- $logs/$name"; cat "$logs/$name"; fi
+          done
+          if ! kill -0 "$pid" 2>/dev/null; then
+            code=0; wait "$pid" || code=$?
+            echo "the shell exited during startup with code $code"; exit 1
+          fi
+          kill "$pid" 2>/dev/null || true
+          if ! grep -q 'Nexus Desktop v.* started' "$logs/nexus-desktop.log" 2>/dev/null; then
+            echo "the shell ran but never logged that it started"; exit 1
+          fi
+          echo "the shell started and stayed up for 20 s"
 
       - uses: tauri-apps/tauri-action@v1.0.0
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          NEXUS_DESKTOP_UPDATER_PUBKEY: ${{ vars.NEXUS_DESKTOP_UPDATER_PUBKEY }}
+          NEXUS_DESKTOP_UPDATER_PUBKEY: ${{ steps.updater.outputs.pubkey }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: v__VERSION__
@@ -227,7 +299,7 @@ jobs:
           # An unsigned build must not publish an update manifest: a client
           # would refuse the artifacts anyway, and a manifest pointing at
           # unverifiable downloads is worse than no manifest.
-          uploadUpdaterJson: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+          uploadUpdaterJson: ${{ steps.updater.outputs.enabled == 'true' }}
           updaterJsonPreferNsis: true
           args: ${{ steps.updater.outputs.args }} ${{ matrix.args }}
 

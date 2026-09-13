@@ -9,6 +9,7 @@
 
 mod commands;
 mod config;
+mod crash;
 mod instance;
 mod tray;
 mod updater;
@@ -45,11 +46,21 @@ pub struct AppState {
     /// The generation of a page load on the instance origin that has started
     /// and not finished.
     pub pending_load: Mutex<Option<u64>>,
+    /// Whether the updater plugin was registered (`updater::registration`).
+    pub updater_enabled: bool,
 }
 
 /// Build the app and run it. `main.rs` is one line; this is the real entry
 /// point, which is also what makes the shell testable as a library.
 pub fn run() {
+    let context = tauri::generate_context!();
+    crash::install(context.config());
+
+    // The updater is registered only when the key and the configuration agree;
+    // a build with one and not the other is an unsigned build (CMP-004
+    // decision A, and the v0.1.6 startup failure).
+    let registration = updater::registration(context.config());
+
     let mut builder = tauri::Builder::default()
         // Registered first, as the plugin's own documentation requires: a
         // second launch hands its arguments to the running process and focuses
@@ -77,14 +88,15 @@ pub fn run() {
             Some(vec![MINIMIZED_ARG]),
         ));
 
-    // No key, no updater: an unsigned build never fetches an artifact it cannot
-    // verify (CMP-004 decision A).
-    if let Some(pubkey) = updater::PUBKEY {
+    if let Ok(pubkey) = registration {
         builder = builder.plugin(tauri_plugin_updater::Builder::new().pubkey(pubkey).build());
     }
 
-    builder
-        .manage(AppState::default())
+    let app = builder
+        .manage(AppState {
+            updater_enabled: registration.is_ok(),
+            ..AppState::default()
+        })
         .invoke_handler(tauri::generate_handler![
             commands::connect,
             commands::retry,
@@ -92,7 +104,7 @@ pub fn run() {
             commands::open_external,
             commands::app_version,
         ])
-        .setup(|app| {
+        .setup(move |app| {
             let handle = app.handle().clone();
 
             let loaded = Config::load(&handle);
@@ -107,22 +119,32 @@ pub fn run() {
 
             tray::build(&handle)?;
             window::open_main_window(&handle, start_hidden)?;
+            if let Err(reason) = registration {
+                log::info!("update checks are disabled: {reason}");
+            }
             updater::spawn_schedule(handle.clone());
 
             log::info!("Nexus Desktop v{} started", app.package_info().version);
             Ok(())
         })
-        .build(tauri::generate_context!())
-        .expect("Nexus Desktop failed to start")
-        .run(|_app, event| {
-            // Closing the window hides it; the process keeps running so the
-            // tray stays available and the update schedule keeps its timer.
-            // An explicit exit carries a code and is honoured.
-            if let tauri::RunEvent::ExitRequested {
-                code: None, api, ..
-            } = event
-            {
-                api.prevent_exit();
-            }
-        });
+        .build(context);
+
+    // A failure here used to be a panic with no console to print it to and no
+    // log line, since the app never reached its first `log::info!`.
+    let app = match app {
+        Ok(app) => app,
+        Err(error) => crash::startup_failure(&error),
+    };
+
+    app.run(|_app, event| {
+        // Closing the window hides it; the process keeps running so the tray
+        // stays available and the update schedule keeps its timer. An explicit
+        // exit carries a code and is honoured.
+        if let tauri::RunEvent::ExitRequested {
+            code: None, api, ..
+        } = event
+        {
+            api.prevent_exit();
+        }
+    });
 }

@@ -77,7 +77,7 @@ fn build_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<tauri::menu::Menu
         let pending = state.pending_update.lock().expect("pending update lock");
         pending.clone()
     };
-    let update = if updater::is_enabled() {
+    let update = if updater::is_enabled(app) {
         let label = match &pending {
             Some(version) => format!("Update to v{version}\u{2026}"),
             None => "Check for updates\u{2026}".to_string(),

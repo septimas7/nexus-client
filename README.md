@@ -61,6 +61,8 @@ If the tray says **Updates unavailable in this build**, that copy was built befo
 
 **I closed the window and it vanished.** It is in the tray. Click the tray icon, or use **Open Nexus** from its menu.
 
+**"Nexus Desktop could not start."** The app hit a problem before its window could open, and the dialog carries the reason. The same text is appended to `crash.log` in the log folder below. Install the latest release; if it happens again, open an issue with the text from the dialog.
+
 **Logs and settings.** From the tray, **About Nexus Desktop** shows the log folder. Defaults:
 
 | System | Logs | Settings |
@@ -68,7 +70,7 @@ If the tray says **Updates unavailable in this build**, that copy was built befo
 | Windows | `%LOCALAPPDATA%\com.septimas.nexus\logs` | `%APPDATA%\com.septimas.nexus\nexus-desktop.json` |
 | macOS | `~/Library/Logs/com.septimas.nexus` | `~/Library/Application Support/com.septimas.nexus/nexus-desktop.json` |
 
-Deleting the settings file resets the client to its first-run state. It holds the instance address, the window position, the last update check and one flag for the tray hint, and never anything secret.
+A failure before the window opens is written to `crash.log` in the log folder and shown in a dialog. Deleting the settings file resets the client to its first-run state. It holds the instance address, the window position, the last update check and one flag for the tray hint, and never anything secret.
 
 ## Uninstall
 
