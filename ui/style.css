@@ -1,0 +1,252 @@
+/*
+ * The shell's three local pages. These are the only pixels Nexus Desktop owns;
+ * everything else in the window is the portal the instance serves.
+ *
+ * The tokens mirror the Platform Design System values the portal uses
+ * (clients/portal/src/styles.css): Inter at 13 px, the 4 px grid, one accent
+ * reserved for the single primary action. The portal follows an in-app theme
+ * setting; these pages have no app to ask, so they follow the OS instead.
+ */
+
+:root {
+  color-scheme: light;
+
+  --accent: #4f5acb;
+  --accent-active: #4340b8;
+  --accent-wash: #eef0fb;
+  --bg-page: #fcfcfd;
+  --bg-surface: #ffffff;
+  --bg-secondary: #f4f5f6;
+  --text-primary: #18181b;
+  --text-secondary: #6b7280;
+  --text-tertiary: #9ca3af;
+  --border-hairline: rgba(0, 0, 0, 0.06);
+  --border-control: rgba(0, 0, 0, 0.08);
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.05);
+  --danger-bg: #fcebeb;
+  --danger-text: #a32d2d;
+  --warning-bg: #faeeda;
+  --warning-text: #854f0b;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+
+    --accent-wash: rgba(79, 90, 203, 0.2);
+    --bg-page: #131316;
+    --bg-surface: #1a1a1e;
+    --bg-secondary: #222229;
+    --text-primary: #f4f4f5;
+    --text-secondary: #a1a1aa;
+    --text-tertiary: #6b7280;
+    --border-hairline: rgba(255, 255, 255, 0.07);
+    --border-control: rgba(255, 255, 255, 0.11);
+    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.32);
+    --danger-bg: #3a1f1f;
+    --danger-text: #f2b5b5;
+    --warning-bg: #3a2d16;
+    --warning-text: #f0cd93;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-primary);
+  background: var(--bg-page);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+main {
+  width: 100%;
+  max-width: 480px;
+  display: grid;
+  gap: 16px;
+  padding: 24px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--accent);
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+label {
+  display: grid;
+  gap: 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 550;
+}
+
+input[type="text"] {
+  min-height: 32px;
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--border-control);
+  border-radius: 5px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font: inherit;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+input[type="text"]:focus {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-wash);
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+button {
+  min-height: 32px;
+  padding: 4px 14px;
+  border: 1px solid var(--border-control);
+  border-radius: 5px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font: inherit;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+button.primary {
+  border-color: transparent;
+  background: var(--accent);
+  color: #ffffff;
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--accent-active);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+a.link {
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+a.link:hover {
+  text-decoration: underline;
+}
+
+.status {
+  min-height: 18px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.note {
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  background: var(--warning-bg);
+  color: var(--warning-text);
+  font-size: 12px;
+}
+
+.error {
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  font-size: 12px;
+}
+
+/* Colour is never the only signal: both callouts carry a glyph and a word. */
+.note::before {
+  content: "!";
+  font-weight: 700;
+}
+
+.error::before {
+  content: "\26A0";
+  font-weight: 700;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+progress {
+  width: 100%;
+  height: 6px;
+  border: none;
+  border-radius: 3px;
+  background: var(--bg-secondary);
+  accent-color: var(--accent);
+}
+
+progress::-webkit-progress-bar {
+  border-radius: 3px;
+  background: var(--bg-secondary);
+}
+
+progress::-webkit-progress-value {
+  border-radius: 3px;
+  background: var(--accent);
+}
+
+.muted {
+  color: var(--text-tertiary);
+  font-size: 11px;
+}

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Instance not reachable</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main>
+      <div class="mark" aria-hidden="true">N</div>
+      <h1 id="title">Your instance is not reachable</h1>
+      <p id="countdown" role="status" aria-live="polite">Nexus Desktop keeps trying.</p>
+
+      <p id="error" class="error" role="alert" hidden></p>
+
+      <div class="actions">
+        <button id="retry" class="primary" type="button">Retry</button>
+        <button id="change" type="button">Change instance...</button>
+      </div>
+
+      <p class="muted">
+        <a id="open-browser" class="link" role="button" tabindex="0" hidden></a>
+      </p>
+    </main>
+
+    <script type="module" src="unreachable.js"></script>
+  </body>
+</html>
