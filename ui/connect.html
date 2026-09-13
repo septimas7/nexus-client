@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Connect to your Nexus</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main>
+      <div class="mark" aria-hidden="true">N</div>
+      <h1>Connect to your Nexus</h1>
+      <p>Nexus Desktop opens your own instance. Enter its address to begin.</p>
+
+      <form id="form" novalidate>
+        <label for="address">Instance address</label>
+        <input
+          id="address"
+          name="address"
+          type="text"
+          placeholder="https://nexus.example.ts.net"
+          autocomplete="off"
+          autocapitalize="off"
+          autocorrect="off"
+          spellcheck="false"
+          enterkeyhint="go"
+        />
+      </form>
+
+      <p id="plaintext-note" class="note" hidden>
+        This address is not encrypted. Use it only on a private network.
+      </p>
+
+      <p id="error" class="error" role="alert" hidden></p>
+
+      <div class="actions">
+        <button id="connect" class="primary" type="submit" form="form">Connect</button>
+        <span id="status" class="status" role="status" aria-live="polite"></span>
+      </div>
+    </main>
+
+    <script type="module" src="connect.js"></script>
+  </body>
+</html>

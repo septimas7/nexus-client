@@ -1,0 +1,9 @@
+/node_modules/
+/target/
+/src-tauri/target/
+/nexus-desktop-core/target/
+/src-tauri/gen/schemas/
+/src-tauri/updater.conf.json
+/build.log
+/build.tail.log
+/dist/
