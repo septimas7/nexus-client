@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The shell's own three pages. There is deliberately no `remote` entry: the instance origin gets no capability, so the portal has no IPC surface at all (CMP-001 decision B).",
+  "local": true,
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:allow-message",
+    "allow-connect",
+    "allow-retry",
+    "allow-current-instance",
+    "allow-open-external",
+    "allow-app-version"
+  ]
+}
