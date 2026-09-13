@@ -14,14 +14,14 @@ Every release is on the [Releases page](https://github.com/septimas7/nexus-clien
 
 ### Windows 10 or 11
 
-1. Download `Nexus Desktop_<version>_x64-setup.exe`.
+1. Download `Nexus.Desktop_<version>_x64-setup.exe` (GitHub shows the file name with dots instead of spaces).
 2. Run it. The install is per user, so it needs no administrator rights and finishes in a few seconds.
 3. Windows SmartScreen shows "Windows protected your PC" because the installer is not code signed. Click **More info**, then **Run anyway**.
 4. If Microsoft Edge WebView2 is missing, the installer downloads it. Windows 11 and current Windows 10 already have it.
 
 ### macOS 12 Monterey or later
 
-1. Download `Nexus Desktop_<version>_universal.dmg`. One file covers Intel and Apple silicon Macs.
+1. Download `Nexus.Desktop_<version>_universal.dmg`. One file covers Intel and Apple silicon Macs. (The `.app.tar.gz` next to it is the updater's own package; you do not need it.)
 2. Open it and drag **Nexus Desktop** to **Applications**.
 3. On the first launch, right-click the app and choose **Open**, then confirm. macOS asks this once because the build is not notarized. A plain double-click gives a "cannot be opened" message until you have done this once.
 
