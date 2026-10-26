@@ -1,0 +1,66 @@
+# Dependabot version updates for Nexus Client.
+#
+# Every workflow job in this repository runs on GitHub-hosted runners, so
+# Dependabot PRs need no runner guard here. If a self-hosted job is ever added,
+# give it `if: github.triggering_actor != 'dependabot[bot]'` when a pull_request
+# or a dependabot/** push can trigger it.
+
+version: 2
+updates:
+  # npm: the root package.json / package-lock.json (@tauri-apps/cli).
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 3
+      semver-major-days: 30
+    groups:
+      minor-and-patch:
+        applies-to: "version-updates"
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Cargo: the workspace root owns Cargo.lock and covers both members
+  # (nexus-desktop-core, src-tauri).
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 3
+      semver-major-days: 30
+    groups:
+      minor-and-patch:
+        applies-to: "version-updates"
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # GitHub Actions used by .github/workflows/release.yml. Cooldown for this
+  # ecosystem supports default-days only (no SemVer-specific days).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 3
+    groups:
+      minor-and-patch:
+        applies-to: "version-updates"
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
