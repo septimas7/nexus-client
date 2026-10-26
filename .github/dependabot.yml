@@ -1,9 +1,10 @@
 # Dependabot version updates for Nexus Client.
 #
-# Every workflow job in this repository runs on GitHub-hosted runners, so
-# Dependabot PRs need no runner guard here. If a self-hosted job is ever added,
-# give it `if: github.triggering_actor != 'dependabot[bot]'` when a pull_request
-# or a dependabot/** push can trigger it.
+# Every job here runs on GitHub-hosted runners, but release.yml's check job requests
+# contents: write, so it is guarded against Dependabot PRs. Any job that is self-hosted
+# or holds a write token must keep that guard: github.actor plus PR author
+# (github.event.pull_request.user.login) plus github.head_ref; push-branch guards must
+# inspect github.ref. Never use github.triggering_actor alone: a re-run changes it.
 
 version: 2
 updates:
