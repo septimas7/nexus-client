@@ -38,7 +38,9 @@ concurrency:
 jobs:
   check:
     name: check
-    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref_type == 'branch')
+    # This job holds a contents:write token (it pushes build receipts), so Dependabot PRs, whose package code is
+    # untrusted, never run it. Keyed on the PR author and branch, not on who triggers the run.
+    if: (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref_type == 'branch')) && github.actor != 'dependabot[bot]' && github.event.pull_request.user.login != 'dependabot[bot]' && !startsWith(github.head_ref, 'dependabot/')
     permissions:
       contents: write
     runs-on: ubuntu-latest
