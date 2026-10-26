@@ -9,7 +9,7 @@
     "icons": "tauri icon assets/icon.svg"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "2.11.4"
+    "@tauri-apps/cli": "2.12.4"
   },
   "description": "The native client for your own Nexus instance"
 }
